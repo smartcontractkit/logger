@@ -28,10 +28,19 @@ func init() {
 		log.Fatalf("failed to register os specific sinks %+v", err)
 	}
 
-	zl, err := zap.NewProduction()
+	var level zapcore.Level
+	err = level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL")))
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	config := zap.NewProductionConfig()
+	config.Level = zap.NewAtomicLevelAt(level)
+	zl, err := config.Build()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	SetLogger(zl)
 }
 
