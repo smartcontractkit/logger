@@ -12,6 +12,8 @@ import (
 	"runtime"
 
 	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -21,16 +23,19 @@ var logger *Logger
 func init() {
 	err := zap.RegisterSink("pretty", prettyConsoleSink(os.Stderr))
 	if err != nil {
+		lineCounter.WithLabelValues("fatal").Inc()
 		log.Fatalf("failed to register pretty printer %+v", err)
 	}
 	err = registerOSSinks()
 	if err != nil {
+		lineCounter.WithLabelValues("fatal").Inc()
 		log.Fatalf("failed to register os specific sinks %+v", err)
 	}
 
 	var level zapcore.Level
 	err = level.UnmarshalText([]byte(os.Getenv("LOG_LEVEL")))
 	if err != nil {
+		lineCounter.WithLabelValues("fatal").Inc()
 		log.Fatal(err)
 	}
 
@@ -38,6 +43,7 @@ func init() {
 	config.Level = zap.NewAtomicLevelAt(level)
 	zl, err := config.Build(zap.AddCallerSkip(1))
 	if err != nil {
+		lineCounter.WithLabelValues("fatal").Inc()
 		log.Fatal(err)
 	}
 
@@ -75,6 +81,7 @@ func SetLogger(zl *zap.Logger) {
 					stderr.Unwrap(err).Error() != "inappropriate ioctl for device" &&
 					stderr.Unwrap(err).Error() != "bad file descriptor" {
 					// logger.Sync() will return 'invalid argument' error when closing file
+					lineCounter.WithLabelValues("fatal").Inc()
 					log.Fatalf("failed to sync logger %+v", err)
 				}
 			}
@@ -100,6 +107,7 @@ func CreateProductionLogger(
 
 	zl, err := config.Build(zap.AddCallerSkip(1))
 	if err != nil {
+		lineCounter.WithLabelValues("fatal").Inc()
 		log.Fatal(err)
 	}
 	return zl
@@ -108,68 +116,81 @@ func CreateProductionLogger(
 // Infow logs an info message and any additional given information.
 func Infow(msg string, keysAndValues ...interface{}) {
 	logger.Infow(msg, keysAndValues...)
+	lineCounter.WithLabelValues("info").Inc()
 }
 
 // Debugw logs a debug message and any additional given information.
 func Debugw(msg string, keysAndValues ...interface{}) {
 	logger.Debugw(msg, keysAndValues...)
+	lineCounter.WithLabelValues("debug").Inc()
 }
 
 // Warnw logs a debug message and any additional given information.
 func Warnw(msg string, keysAndValues ...interface{}) {
 	logger.Warnw(msg, keysAndValues...)
+	lineCounter.WithLabelValues("warning").Inc()
 }
 
 // Errorw logs an error message, any additional given information, and includes
 // stack trace.
 func Errorw(msg string, keysAndValues ...interface{}) {
 	logger.Errorw(msg, keysAndValues...)
+	lineCounter.WithLabelValues("error").Inc()
 }
 
 // Infof formats and then logs the message.
 func Infof(format string, values ...interface{}) {
 	logger.Info(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("info").Inc()
 }
 
 // Debugf formats and then logs the message.
 func Debugf(format string, values ...interface{}) {
 	logger.Debug(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("debug").Inc()
 }
 
 // Warnf formats and then logs the message as Warn.
 func Warnf(format string, values ...interface{}) {
 	logger.Warn(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("warn").Inc()
 }
 
 // Panicf formats and then logs the message before panicking.
 func Panicf(format string, values ...interface{}) {
 	logger.Panic(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("panic").Inc()
 }
 
 // Info logs an info message.
 func Info(args ...interface{}) {
 	logger.Info(args...)
+	lineCounter.WithLabelValues("info").Inc()
 }
 
 // Debug logs a debug message.
 func Debug(args ...interface{}) {
 	logger.Debug(args...)
+	lineCounter.WithLabelValues("debug").Inc()
 }
 
 // Warn logs a message at the warn level.
 func Warn(args ...interface{}) {
 	logger.Warn(args...)
+	lineCounter.WithLabelValues("warning").Inc()
 }
 
 // Error logs an error message.
 func Error(args ...interface{}) {
 	logger.Error(args...)
+	lineCounter.WithLabelValues("error").Inc()
 }
 
 // WarnIf logs the error if present.
 func WarnIf(err error) {
 	if err != nil {
 		logger.Warn(err)
+		lineCounter.WithLabelValues("warning").Inc()
 	}
 }
 
@@ -181,6 +202,7 @@ func ErrorIf(err error, optionalMsg ...string) {
 		} else {
 			logger.Error(err)
 		}
+		lineCounter.WithLabelValues("error").Inc()
 	}
 }
 
@@ -194,6 +216,7 @@ func ErrorIfCalling(f func() error, optionalMsg ...string) {
 		} else {
 			logger.Error(e)
 		}
+		lineCounter.WithLabelValues("error").Inc()
 	}
 }
 
@@ -207,24 +230,34 @@ func PanicIf(err error) {
 // Fatal logs a fatal message then exits the application.
 func Fatal(args ...interface{}) {
 	logger.Fatal(args...)
+	lineCounter.WithLabelValues("fatal").Inc()
 }
 
 // Errorf logs a message at the error level using Sprintf.
 func Errorf(format string, values ...interface{}) {
 	Error(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("error").Inc()
 }
 
 // Fatalf logs a message at the fatal level using Sprintf.
 func Fatalf(format string, values ...interface{}) {
 	Fatal(fmt.Sprintf(format, values...))
+	lineCounter.WithLabelValues("fatal").Inc()
 }
 
 // Panic logs a panic message then panics.
 func Panic(args ...interface{}) {
 	logger.Panic(args...)
+	lineCounter.WithLabelValues("panic").Inc()
 }
 
 // Sync flushes any buffered log entries.
 func Sync() error {
 	return logger.Sync()
 }
+
+var (
+	lineCounter = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "log_lines_total",
+	}, []string{"level"})
+)
