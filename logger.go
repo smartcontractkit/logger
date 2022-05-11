@@ -3,24 +3,62 @@
 package logger
 
 import (
-	stderr "errors"
 	"fmt"
+	"github.com/pkg/errors"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"log"
 	"net/url"
 	"os"
 	"reflect"
 	"runtime"
-
-	"github.com/pkg/errors"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
 )
 
-var logger *Logger
+const TraceId = "TraceID"
 
-func init() {
+var Glogger Logger
+
+// Logger holds a field for the logger interface.
+type logger struct {
+	l *zap.SugaredLogger
+}
+
+type Logger interface {
+	WithSpan(span trace.Span)
+
+	Info(args ...interface{})
+	Infow(msg string, keysAndValues ...interface{})
+	Infof(format string, values ...interface{})
+
+	Debug(args ...interface{})
+	Debugw(msg string, keysAndValues ...interface{})
+	Debugf(format string, values ...interface{})
+
+	Warn(args ...interface{})
+	Warnw(msg string, keysAndValues ...interface{})
+	Warnf(format string, values ...interface{})
+	WarnIf(err error)
+
+	Error(args ...interface{})
+	Errorw(msg string, keysAndValues ...interface{})
+	Errorf(format string, values ...interface{})
+	ErrorIf(err error, optionalMsg ...string)
+	ErrorIfCalling(f func() error, optionalMsg ...string)
+
+	Panic(args ...interface{})
+	Panicf(format string, values ...interface{})
+	PanicIf(err error)
+
+	Fatal(args ...interface{})
+	Fatalf(format string, values ...interface{})
+
+	Sync() error
+}
+
+func NewLogger() Logger {
 	err := zap.RegisterSink("pretty", prettyConsoleSink(os.Stderr))
 	if err != nil {
 		fatalLineCounter.Inc()
@@ -47,11 +85,20 @@ func init() {
 		log.Fatal(err)
 	}
 
-	SetLogger(zl)
+	return logger{
+		l: zl.Sugar(),
+	}
 }
 
-func GetLogger() *Logger {
-	return logger
+func NewGlobalLogger() {
+	Glogger = NewLogger()
+}
+
+func (log logger) GetLogger() Logger {
+	if Glogger == nil {
+		NewGlobalLogger()
+	}
+	return Glogger
 }
 
 func prettyConsoleSink(s zap.Sink) func(*url.URL) (zap.Sink, error) {
@@ -60,34 +107,11 @@ func prettyConsoleSink(s zap.Sink) func(*url.URL) (zap.Sink, error) {
 	}
 }
 
-// Logger holds a field for the logger interface.
-type Logger struct {
-	*zap.SugaredLogger
-}
-
 // Write logs a message at the Info level and returns the length
 // of the given bytes.
-func (l *Logger) Write(b []byte) (int, error) {
-	l.Info(string(b))
+func (log logger) Write(b []byte) (int, error) {
+	log.l.Info(string(b))
 	return len(b), nil
-}
-
-// SetLogger sets the internal logger to the given input.
-func SetLogger(zl *zap.Logger) {
-	if logger != nil {
-		defer func() {
-			if err := logger.Sync(); err != nil {
-				if stderr.Unwrap(err).Error() != os.ErrInvalid.Error() &&
-					stderr.Unwrap(err).Error() != "inappropriate ioctl for device" &&
-					stderr.Unwrap(err).Error() != "bad file descriptor" {
-					fatalLineCounter.Inc()
-					// logger.Sync() will return 'invalid argument' error when closing file
-					log.Fatalf("failed to sync logger %+v", err)
-				}
-			}
-		}()
-	}
-	logger = &Logger{zl.Sugar()}
 }
 
 // CreateProductionLogger returns a log config for the passed directory
@@ -114,146 +138,153 @@ func CreateProductionLogger(
 }
 
 // Infow logs an info message and any additional given information.
-func Infow(msg string, keysAndValues ...interface{}) {
-	logger.Infow(msg, keysAndValues...)
+func (log logger) Infow(msg string, keysAndValues ...interface{}) {
+	log.l.Infow(msg, keysAndValues...)
 	infoLineCounter.Inc()
 }
 
 // Debugw logs a debug message and any additional given information.
-func Debugw(msg string, keysAndValues ...interface{}) {
-	logger.Debugw(msg, keysAndValues...)
+func (log logger) Debugw(msg string, keysAndValues ...interface{}) {
+	log.l.Debugw(msg, keysAndValues...)
 	debugLineCounter.Inc()
 }
 
 // Warnw logs a debug message and any additional given information.
-func Warnw(msg string, keysAndValues ...interface{}) {
-	logger.Warnw(msg, keysAndValues...)
+func (log logger) Warnw(msg string, keysAndValues ...interface{}) {
+	log.l.Warnw(msg, keysAndValues...)
 	warnLineCounter.Inc()
 }
 
 // Errorw logs an error message, any additional given information, and includes
 // stack trace.
-func Errorw(msg string, keysAndValues ...interface{}) {
-	logger.Errorw(msg, keysAndValues...)
+func (log logger) Errorw(msg string, keysAndValues ...interface{}) {
+	log.l.Errorw(msg, keysAndValues...)
 	errorLineCounter.Inc()
 }
 
 // Infof formats and then logs the message.
-func Infof(format string, values ...interface{}) {
-	logger.Info(fmt.Sprintf(format, values...))
+func (log logger) Infof(format string, values ...interface{}) {
+	log.l.Info(fmt.Sprintf(format, values...))
 	infoLineCounter.Inc()
 }
 
 // Debugf formats and then logs the message.
-func Debugf(format string, values ...interface{}) {
-	logger.Debug(fmt.Sprintf(format, values...))
+func (log logger) Debugf(format string, values ...interface{}) {
+	log.l.Debug(fmt.Sprintf(format, values...))
 	debugLineCounter.Inc()
 }
 
 // Warnf formats and then logs the message as Warn.
-func Warnf(format string, values ...interface{}) {
-	logger.Warn(fmt.Sprintf(format, values...))
+func (log logger) Warnf(format string, values ...interface{}) {
+	log.l.Warn(fmt.Sprintf(format, values...))
 	warnLineCounter.Inc()
 }
 
 // Panicf formats and then logs the message before panicking.
-func Panicf(format string, values ...interface{}) {
-	logger.Panic(fmt.Sprintf(format, values...))
+func (log logger) Panicf(format string, values ...interface{}) {
+	log.l.Panic(fmt.Sprintf(format, values...))
 	panicLineCounter.Inc()
 }
 
 // Info logs an info message.
-func Info(args ...interface{}) {
-	logger.Info(args...)
+func (log logger) Info(args ...interface{}) {
+	log.l.Info(args...)
 	infoLineCounter.Inc()
 }
 
 // Debug logs a debug message.
-func Debug(args ...interface{}) {
-	logger.Debug(args...)
+func (log logger) Debug(args ...interface{}) {
+	log.l.Debug(args...)
 	debugLineCounter.Inc()
 }
 
 // Warn logs a message at the warn level.
-func Warn(args ...interface{}) {
-	logger.Warn(args...)
+func (log logger) Warn(args ...interface{}) {
+	log.l.Warn(args...)
 	warnLineCounter.Inc()
 }
 
 // Error logs an error message.
-func Error(args ...interface{}) {
-	logger.Error(args...)
+func (log logger) Error(args ...interface{}) {
+	log.l.Error(args...)
 	errorLineCounter.Inc()
 }
 
 // WarnIf logs the error if present.
-func WarnIf(err error) {
+func (log logger) WarnIf(err error) {
 	if err != nil {
-		logger.Warn(err)
+		log.l.Warn(err)
 		warnLineCounter.Inc()
 	}
 }
 
 // ErrorIf logs the error if present.
-func ErrorIf(err error, optionalMsg ...string) {
+func (log logger) ErrorIf(err error, optionalMsg ...string) {
 	if err != nil {
 		if len(optionalMsg) > 0 {
-			logger.Error(errors.Wrap(err, optionalMsg[0]))
+			log.l.Error(errors.Wrap(err, optionalMsg[0]))
 		} else {
-			logger.Error(err)
+			log.l.Error(err)
 		}
 		errorLineCounter.Inc()
 	}
 }
 
 // ErrorIfCalling calls the given function and logs the error of it if there is.
-func ErrorIfCalling(f func() error, optionalMsg ...string) {
+func (log logger) ErrorIfCalling(f func() error, optionalMsg ...string) {
 	err := f()
 	if err != nil {
 		e := errors.Wrap(err, runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name())
 		if len(optionalMsg) > 0 {
-			logger.Error(errors.Wrap(e, optionalMsg[0]))
+			log.l.Error(errors.Wrap(e, optionalMsg[0]))
 		} else {
-			logger.Error(e)
+			log.l.Error(e)
 		}
 		errorLineCounter.Inc()
 	}
 }
 
 // PanicIf logs the error if present.
-func PanicIf(err error) {
+func (log logger) PanicIf(err error) {
 	if err != nil {
-		logger.Panic(err)
+		log.l.Panic(err)
 	}
 }
 
 // Fatal logs a fatal message then exits the application.
-func Fatal(args ...interface{}) {
+func (log logger) Fatal(args ...interface{}) {
 	fatalLineCounter.Inc()
-	logger.Fatal(args...)
+	log.l.Fatal(args...)
 }
 
 // Errorf logs a message at the error level using Sprintf.
-func Errorf(format string, values ...interface{}) {
-	Error(fmt.Sprintf(format, values...))
+func (log logger) Errorf(format string, values ...interface{}) {
+	log.l.Error(fmt.Sprintf(format, values...))
 	errorLineCounter.Inc()
 }
 
 // Fatalf logs a message at the fatal level using Sprintf.
-func Fatalf(format string, values ...interface{}) {
-	Fatal(fmt.Sprintf(format, values...))
+func (log logger) Fatalf(format string, values ...interface{}) {
+	log.l.Fatal(fmt.Sprintf(format, values...))
 	fatalLineCounter.Inc()
 }
 
 // Panic logs a panic message then panics.
-func Panic(args ...interface{}) {
-	logger.Panic(args...)
+func (log logger) Panic(args ...interface{}) {
+	log.l.Panic(args...)
 	panicLineCounter.Inc()
 }
 
+// WithSpan adds span to the log message
+func (log logger) WithSpan(span trace.Span) {
+	if span != nil {
+		log.l.With(TraceId, span.SpanContext().TraceID().String())
+	}
+}
+
 // Sync flushes any buffered log entries.
-func Sync() error {
-	return logger.Sync()
+func (log logger) Sync() error {
+	return log.l.Sync()
 }
 
 var (
