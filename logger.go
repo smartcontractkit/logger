@@ -19,12 +19,12 @@ import (
 
 const TraceId = "TraceID"
 
+var Glogger Logger
+
 // Logger holds a field for the logger interface.
 type logger struct {
 	l *zap.SugaredLogger
 }
-
-var l *logger
 
 type Logger interface {
 	WithSpan(span trace.Span)
@@ -58,7 +58,7 @@ type Logger interface {
 	Sync() error
 }
 
-func init() {
+func NewLogger() Logger {
 	err := zap.RegisterSink("pretty", prettyConsoleSink(os.Stderr))
 	if err != nil {
 		fatalLineCounter.Inc()
@@ -85,9 +85,20 @@ func init() {
 		log.Fatal(err)
 	}
 
-	l = &logger{
+	return logger{
 		l: zl.Sugar(),
 	}
+}
+
+func NewGlobalLogger() {
+	Glogger = NewLogger()
+}
+
+func (log logger) GetLogger() Logger {
+	if Glogger == nil {
+		NewGlobalLogger()
+	}
+	return Glogger
 }
 
 func prettyConsoleSink(s zap.Sink) func(*url.URL) (zap.Sink, error) {
@@ -129,11 +140,6 @@ func CreateProductionLogger(
 // Infow logs an info message and any additional given information.
 func (log logger) Infow(msg string, keysAndValues ...interface{}) {
 	log.l.Infow(msg, keysAndValues...)
-	infoLineCounter.Inc()
-}
-
-func Infow(msg string, keysAndValues ...interface{}) {
-	l.Infow(msg, keysAndValues...)
 	infoLineCounter.Inc()
 }
 
