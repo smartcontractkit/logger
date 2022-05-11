@@ -276,7 +276,7 @@ func (log logger) Panic(args ...interface{}) {
 }
 
 // WithSpan adds span to the log message
-func (log logger) WithSpan(span trace.Span) logger {
+func (log logger) WithSpan(span trace.Span) Logger {
 	if span != nil {
 		log.l.With(TraceId, span.SpanContext().TraceID().String())
 	}
