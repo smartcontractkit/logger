@@ -94,7 +94,7 @@ func NewGlobalLogger() {
 	Glogger = NewLogger()
 }
 
-func (log logger) GetLogger() Logger {
+func GetLogger() Logger {
 	if Glogger == nil {
 		NewGlobalLogger()
 	}
