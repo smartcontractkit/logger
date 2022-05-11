@@ -27,7 +27,7 @@ type logger struct {
 }
 
 type Logger interface {
-	WithSpan(span trace.Span)
+	WithSpan(span trace.Span) Logger
 
 	Info(args ...interface{})
 	Infow(msg string, keysAndValues ...interface{})
